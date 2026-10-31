@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#050b18">
+<title>SleepVR — Céu infinito</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050b18;color:#edf5ff;font-family:Inter,system-ui,Segoe UI,sans-serif}
+#scene{position:fixed;inset:0}canvas{display:block;width:100%;height:100%}
+.overlay{position:fixed;inset:0;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between;padding:24px;z-index:2}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px}.logo{letter-spacing:.2em;font-size:13px;font-weight:700;text-shadow:0 2px 20px #000}.logo span{color:#a9d9ff}
+.badge{font-size:11px;color:#c4d6eb;border:1px solid #cce5ff2b;background:#0715268a;padding:8px 12px;border-radius:30px;backdrop-filter:blur(12px)}
+.bottom{align-self:center;text-align:center;max-width:580px;text-shadow:0 2px 18px #000}
+h1{font-size:clamp(25px,5vw,48px);font-weight:400;letter-spacing:-.04em;margin:0 0 8px}.sub{font-size:13px;color:#c2d1e4;line-height:1.6}
+.controls{position:fixed;z-index:4;left:50%;bottom:22px;transform:translateX(-50%);display:flex;gap:8px;flex-wrap:wrap;justify-content:center;width:min(95vw,700px);pointer-events:auto}
+button{border:1px solid #d7eaff35;background:#0a1b30c9;color:#eaf4ff;padding:11px 15px;border-radius:30px;font:500 12px system-ui;backdrop-filter:blur(14px);cursor:pointer}
+button.primary{background:#c7e6ff;color:#10243a;border-color:transparent;font-weight:700}
+button:active{transform:scale(.97)}#hint{position:fixed;z-index:3;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;width:min(85vw,420px);padding:24px;border-radius:22px;background:#071526b8;border:1px solid #d7eaff25;backdrop-filter:blur(18px);pointer-events:auto}
+#hint h2{font-size:22px;font-weight:500;margin:0 0 8px}#hint p{font-size:13px;color:#c2d1e4;line-height:1.6;margin:0 0 16px}
+#hint .tiny{font-size:10px;color:#8fa8c3;margin-top:12px}
+#toast{position:fixed;z-index:8;top:20px;left:50%;transform:translateX(-50%);background:#071526dc;border:1px solid #d7eaff30;border-radius:30px;padding:10px 15px;font-size:12px;opacity:0;transition:opacity .3s;pointer-events:none}
+@media(max-width:560px){.overlay{padding:16px}.bottom{margin-bottom:92px}.badge{font-size:10px}.controls{bottom:12px}button{padding:10px 12px}}
+</style>
+</head>
+<body>
+<div id="scene"></div>
+<div class="overlay">
+<header><div class="logo">SLEEP<span>VR</span></div><div class="badge">✦ MODO DEITADO · 360°</div></header>
+<div class="bottom"><h1>Seu céu particular.</h1><div class="sub">Deite, vire de lado, olhe para cima ou para onde quiser.<br>O céu continua ao seu redor.</div></div>
+</div>
+<div id="hint">
+<h2>Bem-vindo ao SleepVR 🌙</h2>
+<p>Uma noite tranquila em um céu infinito. Coloque o headset, encontre uma posição confortável e entre no ambiente.</p>
+<button class="primary" id="enter">Entrar no ambiente</button>
+<div class="tiny">No Quest 3S, use o navegador e permita realidade virtual quando solicitado.</div>
+</div>
+<div id="toast"></div>
+<div class="controls">
+<button class="primary" id="vr">◉ Entrar em VR</button>
+<button id="recenter">⊙ Recentrar</button>
+<button id="ambience">♫ Som: ligado</button>
+<button id="volume">Volume 35%</button>
+<button id="hide">Ocultar interface</button>
+</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+const root=document.querySelector('#scene'),toastEl=document.querySelector('#toast');
+function toast(t){toastEl.textContent=t;toastEl.style.opacity=1;clearTimeout(toast.timer);toast.timer=setTimeout(()=>toastEl.style.opacity=0,2600)}
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x050b18);
+const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.1,1200);camera.position.set(0,0,0);
+const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.6));renderer.setSize(innerWidth,innerHeight);renderer.xr.enabled=true;renderer.outputColorSpace=THREE.SRGBColorSpace;root.appendChild(renderer.domElement);
+const world=new THREE.Group();scene.add(world);
+// Sky dome with a soft vertical gradient texture.
+const skyCanvas=document.createElement('canvas');skyCanvas.width=1024;skyCanvas.height=512;const ctx=skyCanvas.getContext('2d');
+const grad=ctx.createLinearGradient(0,0,0,512);grad.addColorStop(0,'#020611');grad.addColorStop(.42,'#101e3c');grad.addColorStop(.72,'#203b5a');grad.addColorStop(1,'#071321');ctx.fillStyle=grad;ctx.fillRect(0,0,1024,512);
+const tex=new THREE.CanvasTexture(skyCanvas);tex.colorSpace=THREE.SRGBColorSpace;
+const dome=new THREE.Mesh(new THREE.SphereGeometry(500,48,32),new THREE.MeshBasicMaterial({map:tex,side:THREE.BackSide}));world.add(dome);
+// Stars in every direction.
+const starCount=2600,positions=new Float32Array(starCount*3),sizes=new Float32Array(starCount);
+for(let i=0;i<starCount;i++){const u=Math.random()*2-1,a=Math.random()*Math.PI*2,r=480,y=u*480,h=Math.sqrt(480*480-y*y);positions[i*3]=Math.cos(a)*h;positions[i*3+1]=y;positions[i*3+2]=Math.sin(a)*h;sizes[i]=Math.random()}
+const starGeo=new THREE.BufferGeometry();starGeo.setAttribute('position',new THREE.BufferAttribute(positions,3));starGeo.setAttribute('aSize',new THREE.BufferAttribute(sizes,1));
+const starMat=new THREE.PointsMaterial({color:0xd9edff,size:1.45,transparent:true,opacity:.9,sizeAttenuation:false,depthWrite:false});
+const stars=new THREE.Points(starGeo,starMat);world.add(stars);
+// Moon positioned high in the sky, visible from a broad range of lying angles.
+const moonGroup=new THREE.Group();moonGroup.position.set(-42,82,-280);world.add(moonGroup);
+const moon=new THREE.Mesh(new THREE.SphereGeometry(19,40,32),new THREE.MeshBasicMaterial({color:0xe2efff}));moonGroup.add(moon);
+const halo=new THREE.Mesh(new THREE.SphereGeometry(27,32,24),new THREE.MeshBasicMaterial({color:0x8fc8ff,transparent:true,opacity:.075,side:THREE.BackSide}));moonGroup.add(halo);
+const moonLight=new THREE.PointLight(0x9bcfff,1.2,260);moonLight.position.copy(moonGroup.position);world.add(moonLight);
+// Distant layered mountain silhouettes.
+function ridge(radius,y,color,seed){const pts=[];for(let i=0;i<=100;i++){const a=i/100*Math.PI*2;const variation=Math.sin(i*.43+seed)*9+Math.sin(i*.13+seed)*14;pts.push(new THREE.Vector3(Math.cos(a)*radius,y+variation,Math.sin(a)*radius))}const geo=new THREE.BufferGeometry().setFromPoints(pts);const line=new THREE.LineLoop(geo,new THREE.LineBasicMaterial({color,transparent:true,opacity:.65}));world.add(line)}
+ridge(360,-155,0x274766,2);ridge(330,-175,0x142c46,8);
+// Gentle aurora ribbons as curved translucent bands.
+for(let k=0;k<4;k++){const pts=[];for(let i=0;i<=80;i++){const t=i/80;const x=(t-.5)*300;const y=95+k*13+Math.sin(t*7+k)*13;const z=-245-k*8;pts.push(new THREE.Vector3(x,y,z))}const curve=new THREE.CatmullRomCurve3(pts);const mesh=new THREE.Mesh(new THREE.TubeGeometry(curve,100,1.2+k*.35,5,false),new THREE.MeshBasicMaterial({color:[0x75d7d0,0x7d9dff,0x8ed8ff,0x8c8cff][k],transparent:true,opacity:.14}));world.add(mesh)}
+// Very subtle cloud wisps drifting around the horizon.
+const cloudMat=new THREE.MeshBasicMaterial({color:0x9bbbd8,transparent:true,opacity:.045,side:THREE.DoubleSide,depthWrite:false});
+for(let i=0;i<18;i++){const m=new THREE.Mesh(new THREE.PlaneGeometry(48+Math.random()*55,10+Math.random()*12),cloudMat.clone());const a=i/18*Math.PI*2;m.position.set(Math.cos(a)*245,-65+Math.random()*45,Math.sin(a)*245);m.lookAt(0,m.position.y,0);world.add(m);m.userData.speed=(Math.random()-.5)*.0008}
+scene.add(new THREE.HemisphereLight(0x91b9e8,0x07111e,.5));
+// Desktop look controls: drag to look around. In VR, headset tracking takes over.
+let dragging=false,lastX=0,lastY=0,yaw=0,pitch=0;
+renderer.domElement.addEventListener('pointerdown',e=>{dragging=true;lastX=e.clientX;lastY=e.clientY;renderer.domElement.setPointerCapture(e.pointerId)});
+renderer.domElement.addEventListener('pointerup',()=>dragging=false);
+renderer.domElement.addEventListener('pointermove',e=>{if(!dragging||renderer.xr.isPresenting)return;const dx=e.clientX-lastX,dy=e.clientY-lastY;lastX=e.clientX;lastY=e.clientY;yaw-=dx*.004;pitch=Math.max(-1.35,Math.min(1.35,pitch-dy*.004));camera.rotation.set(pitch,yaw,0,'YXZ')});
+let audioCtx=null,master=null,ambienceOn=true,volume=0.35,noiseSource=null;
+function startAmbience(){if(!audioCtx){audioCtx=new(window.AudioContext||window.webkitAudioContext)();master=audioCtx.createGain();master.gain.value=volume*.10;master.connect(audioCtx.destination);const buffer=audioCtx.createBuffer(1,audioCtx.sampleRate*4,audioCtx.sampleRate);const d=buffer.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;noiseSource=audioCtx.createBufferSource();noiseSource.buffer=buffer;noiseSource.loop=true;const filter=audioCtx.createBiquadFilter();filter.type='lowpass';filter.frequency.value=550;const gain=audioCtx.createGain();gain.gain.value=.55;noiseSource.connect(filter);filter.connect(gain);gain.connect(master);noiseSource.start();const osc=audioCtx.createOscillator(),og=audioCtx.createGain();osc.frequency.value=72;og.gain.value=.018;osc.connect(og);og.connect(master);osc.start()}audioCtx.resume();master.gain.setTargetAtTime(volume*.10,audioCtx.currentTime,.5)}
+function stopAmbience(){if(master&&audioCtx)master.gain.setTargetAtTime(0,audioCtx.currentTime,.5)}
+document.querySelector('#enter').onclick=()=>{document.querySelector('#hint').style.display='none';startAmbience();toast('Encontre sua posição confortável 🌙')};
+document.querySelector('#ambience').onclick=()=>{ambienceOn=!ambienceOn;document.querySelector('#ambience').textContent='♫ Som: '+(ambienceOn?'ligado':'desligado');if(ambienceOn)startAmbience();else stopAmbience()};
+document.querySelector('#volume').onclick=()=>{volume=volume>=.8?.15:Math.round((volume+.2)*100)/100;document.querySelector('#volume').textContent='Volume '+Math.round(volume*100)+'%';if(master&&ambienceOn)master.gain.setTargetAtTime(volume*.10,audioCtx.currentTime,.2)};
+document.querySelector('#hide').onclick=()=>{const controls=document.querySelector('.controls'),header=document.querySelector('header'),bottom=document.querySelector('.bottom');const hidden=controls.style.display==='none';controls.style.display=hidden?'flex':'none';header.style.visibility=hidden?'visible':'hidden';bottom.style.visibility=hidden?'visible':'hidden';if(hidden)toast('Interface visível')};
+document.querySelector('#recenter').onclick=()=>{yaw=0;pitch=0;if(!renderer.xr.isPresenting)camera.rotation.set(0,0,0);toast('Referência visual centralizada')};
+document.querySelector('#vr').onclick=async()=>{try{if(!navigator.xr){toast('WebXR não disponível. Abra em um navegador compatível com VR.');return}const ok=await navigator.xr.isSessionSupported('immersive-vr');if(!ok){toast('Este navegador não liberou o modo VR.');return}const session=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor','hand-tracking']});renderer.xr.setSession(session);document.querySelector('#hint').style.display='none';startAmbience();session.addEventListener('end',()=>toast('Você saiu do modo VR. Descanse bem!'));}catch(e){toast('Não foi possível iniciar VR: '+e.message)}};
+window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+const clock=new THREE.Clock();
+renderer.setAnimationLoop(()=>{const t=clock.getElapsedTime();stars.material.opacity=.72+Math.sin(t*.25)*.12;moonGroup.rotation.y=Math.sin(t*.025)*.04;world.children.forEach(o=>{if(o.userData.speed)o.position.x+=o.userData.speed});renderer.render(scene,camera)});
+</script>
+</body>
+</html>
